@@ -28,6 +28,18 @@ docker-push:
 helm-template:
 	helm template kubevirt-aie-webhook deploy/helm/kubevirt-aie-webhook
 
+.PHONY: cluster-up
+cluster-up:
+	scripts/kubevirtci.sh up
+
+.PHONY: cluster-down
+cluster-down:
+	scripts/kubevirtci.sh down
+
+.PHONY: cluster-sync
+cluster-sync:
+	scripts/kubevirtci.sh sync
+
 .PHONY: clean
 clean:
-	rm -f kubevirt-aie-webhook
+	rm -rf kubevirt-aie-webhook _kubevirt
