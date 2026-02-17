@@ -1,0 +1,17 @@
+{{- if .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "kubevirt-aie-webhook.fullname" . }}-tls
+  namespace: {{ include "kubevirt-aie-webhook.namespace" . }}
+  labels:
+    {{- include "kubevirt-aie-webhook.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "kubevirt-aie-webhook.fullname" . }}-tls
+  issuerRef:
+    name: {{ include "kubevirt-aie-webhook.fullname" . }}-selfsigned
+    kind: Issuer
+  dnsNames:
+  - {{ include "kubevirt-aie-webhook.fullname" . }}.{{ include "kubevirt-aie-webhook.namespace" . }}.svc
+  - {{ include "kubevirt-aie-webhook.fullname" . }}.{{ include "kubevirt-aie-webhook.namespace" . }}.svc.cluster.local
+{{- end }}

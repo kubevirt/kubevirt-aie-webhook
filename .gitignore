@@ -1,5 +1,5 @@
 # Binaries
-kubevirt-aie-webhook
+/kubevirt-aie-webhook
 bin/
 
 # Go

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubevirt-aie-launcher-config
+  namespace: {{ include "kubevirt-aie-webhook.namespace" . }}
+  labels:
+    {{- include "kubevirt-aie-webhook.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    rules:
+    {{- range .Values.launcherConfig.rules }}
+    - name: {{ .name | quote }}
+      image: {{ .image | quote }}
+      selector:
+        {{- if .selector.deviceNames }}
+        deviceNames:
+        {{- range .selector.deviceNames }}
+        - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .selector.vmLabels }}
+        vmLabels:
+          matchLabels:
+            {{- range $key, $value := .selector.vmLabels.matchLabels }}
+            {{ $key }}: {{ $value | quote }}
+            {{- end }}
+        {{- end }}
+    {{- end }}

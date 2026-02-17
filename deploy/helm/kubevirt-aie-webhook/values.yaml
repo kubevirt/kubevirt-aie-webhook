@@ -1,0 +1,34 @@
+replicaCount: 1
+
+image:
+  repository: quay.io/kubevirt/kubevirt-aie-webhook
+  tag: latest
+  pullPolicy: IfNotPresent
+
+namespace: kubevirt
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+certManager:
+  enabled: true
+
+launcherConfig:
+  rules: []
+  # - name: "nvidia-gpu-launcher"
+  #   image: "registry.example.com/aie-virt-launcher:v1.8.0"
+  #   selector:
+  #     deviceNames:
+  #     - "nvidia.com/A100"
+  #     - "nvidia.com/H100"
+  # - name: "labeled-vms"
+  #   image: "registry.example.com/aie-virt-launcher:v1.8.0"
+  #   selector:
+  #     vmLabels:
+  #       matchLabels:
+  #         aie.kubevirt.io/launcher: "true"
