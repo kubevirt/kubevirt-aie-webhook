@@ -1,18 +1,31 @@
 package main
 
 import (
+	"context"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
+
+	"kubevirt.io/kubevirt-aie-webhook/pkg/config"
+)
+
+const (
+	configMapName = "kubevirt-aie-launcher-config"
+	configDataKey = "config.yaml"
 )
 
 var (
@@ -25,8 +38,48 @@ func init() {
 	utilruntime.Must(kubevirtv1.AddToScheme(scheme))
 }
 
+// configMapReconciler watches the launcher config ConfigMap and updates the store.
+type configMapReconciler struct {
+	client client.Client
+	store  *config.ConfigStore
+	ns     string
+}
+
+func (r *configMapReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	if req.Name != configMapName || req.Namespace != r.ns {
+		return reconcile.Result{}, nil
+	}
+
+	var cm corev1.ConfigMap
+	if err := r.client.Get(ctx, req.NamespacedName, &cm); err != nil {
+		log.Error(err, "unable to fetch ConfigMap")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	data, ok := cm.Data[configDataKey]
+	if !ok {
+		log.Info("ConfigMap missing data key", "key", configDataKey)
+		return reconcile.Result{}, nil
+	}
+
+	if err := r.store.Update([]byte(data)); err != nil {
+		log.Error(err, "failed to parse launcher config")
+		return reconcile.Result{}, err
+	}
+
+	log.Info("launcher config updated")
+	return reconcile.Result{}, nil
+}
+
 func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
+
+	namespace := os.Getenv("NAMESPACE")
+	if namespace == "" {
+		namespace = "kubevirt"
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -40,6 +93,34 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create manager")
+		os.Exit(1)
+	}
+
+	store := config.NewConfigStore()
+
+	// Set up ConfigMap watcher
+	cmReconciler := &configMapReconciler{
+		client: mgr.GetClient(),
+		store:  store,
+		ns:     namespace,
+	}
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("configmap-watcher").
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(
+			func(ctx context.Context, obj client.Object) []reconcile.Request {
+				if obj.GetName() != configMapName || obj.GetNamespace() != namespace {
+					return nil
+				}
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Name:      obj.GetName(),
+						Namespace: obj.GetNamespace(),
+					},
+				}}
+			},
+		)).
+		Complete(cmReconciler); err != nil {
+		setupLog.Error(err, "unable to create ConfigMap controller")
 		os.Exit(1)
 	}
 
