@@ -17,10 +17,12 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt-aie-webhook/pkg/config"
+	webhookpkg "kubevirt.io/kubevirt-aie-webhook/pkg/webhook"
 )
 
 const (
@@ -123,6 +125,15 @@ func main() {
 		setupLog.Error(err, "unable to create ConfigMap controller")
 		os.Exit(1)
 	}
+
+	// Register mutating webhook handler
+	mgr.GetWebhookServer().Register("/mutate-pods", &webhook.Admission{
+		Handler: &webhookpkg.VirtLauncherMutator{
+			Client:  mgr.GetClient(),
+			Store:   store,
+			Decoder: admission.NewDecoder(scheme),
+		},
+	})
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
