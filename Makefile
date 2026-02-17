@@ -40,6 +40,10 @@ cluster-down:
 cluster-sync:
 	scripts/kubevirtci.sh sync
 
+.PHONY: functest
+functest:
+	KUBECONFIG=$$(scripts/kubevirtci.sh kubeconfig) go test ./tests/... -v -count=1 -timeout 20m
+
 .PHONY: clean
 clean:
 	rm -rf kubevirt-aie-webhook _kubevirt

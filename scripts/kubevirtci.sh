@@ -74,13 +74,74 @@ function kubevirtci::sync() {
         ${cri} tag "${img}" "${registry_img}"
         ${cri} push "${registry_img}" --tls-verify=false 2>/dev/null || \
             ${cri} push "${registry_img}"
-        img="${registry_img}"
+        img="registry:5000/${image_name}:${docker_tag}"
     fi
 
-    echo "Deploying webhook to cluster..."
+    echo "Creating devel_alt virt-launcher image..."
+    local virt_api_image
+    virt_api_image=$(KUBECONFIG=$(kubevirtci::kubeconfig) ${_kubectl} get deployment virt-api \
+        -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}')
+    local image_prefix="${virt_api_image%/*}"
+    local virt_launcher_devel="${image_prefix}/virt-launcher:devel"
+    local virt_launcher_devel_alt="${image_prefix}/virt-launcher:devel_alt"
+
+    if [[ -n "${registry_port}" ]]; then
+        local local_devel="localhost:${registry_port}/kubevirt/virt-launcher:devel"
+        local local_devel_alt="localhost:${registry_port}/kubevirt/virt-launcher:devel_alt"
+        ${cri} pull "${local_devel}" --tls-verify=false 2>/dev/null || \
+            ${cri} pull "${local_devel}"
+        ${cri} tag "${local_devel}" "${local_devel_alt}"
+        ${cri} push "${local_devel_alt}" --tls-verify=false 2>/dev/null || \
+            ${cri} push "${local_devel_alt}"
+    fi
+
+    echo "Generating self-signed TLS certificates..."
+    local cert_dir
+    cert_dir=$(mktemp -d /tmp/kubevirt-aie-webhook-certs.XXXXXX)
+    local service_name="kubevirt-aie-webhook"
+    local san="DNS:${service_name}.${NAMESPACE}.svc,DNS:${service_name}.${NAMESPACE}.svc.cluster.local"
+
+    openssl genrsa -out "${cert_dir}/ca.key" 2048
+    openssl req -x509 -new -nodes -key "${cert_dir}/ca.key" \
+        -subj "/CN=${service_name}-ca" -days 3650 \
+        -out "${cert_dir}/ca.crt"
+
+    openssl genrsa -out "${cert_dir}/tls.key" 2048
+    openssl req -new -key "${cert_dir}/tls.key" \
+        -subj "/CN=${service_name}.${NAMESPACE}.svc" \
+        -out "${cert_dir}/tls.csr"
+    openssl x509 -req -in "${cert_dir}/tls.csr" \
+        -CA "${cert_dir}/ca.crt" -CAkey "${cert_dir}/ca.key" -CAcreateserial \
+        -days 3650 -extfile <(echo "subjectAltName=${san}") \
+        -out "${cert_dir}/tls.crt"
+
+    echo "Creating TLS secret in cluster..."
     local kubeconfig
     kubeconfig=$(kubevirtci::kubeconfig)
 
+    KUBECONFIG="${kubeconfig}" ${_kubectl} create secret tls "${service_name}-tls" \
+        --cert="${cert_dir}/tls.crt" \
+        --key="${cert_dir}/tls.key" \
+        --namespace "${NAMESPACE}" \
+        --dry-run=client -o yaml | KUBECONFIG="${kubeconfig}" ${_kubectl} apply -f -
+
+    echo "Configuring webhook rule for functional tests..."
+    local values_file
+    values_file=$(mktemp /tmp/kubevirt-aie-webhook-values.XXXXXX.yaml)
+    cat > "${values_file}" <<EOF
+certManager:
+  enabled: false
+launcherConfig:
+  rules:
+  - name: "functest-devel-alt"
+    image: "${virt_launcher_devel_alt}"
+    selector:
+      vmLabels:
+        matchLabels:
+          kubevirt-aie-webhook/alternative-launcher: "true"
+EOF
+
+    echo "Deploying webhook to cluster..."
     KUBECONFIG="${kubeconfig}" helm upgrade --install kubevirt-aie-webhook \
         "${_base_dir}/deploy/helm/kubevirt-aie-webhook" \
         --namespace "${NAMESPACE}" \
@@ -89,7 +150,17 @@ function kubevirtci::sync() {
         --set image.tag="${docker_tag}" \
         --set image.pullPolicy="${IMAGE_PULL_POLICY:-Always}" \
         --set namespace="${NAMESPACE}" \
+        -f "${values_file}" \
         --wait
+
+    echo "Patching webhook configuration with CA bundle..."
+    local ca_bundle
+    ca_bundle=$(base64 -w 0 < "${cert_dir}/ca.crt")
+    KUBECONFIG="${kubeconfig}" ${_kubectl} patch mutatingwebhookconfiguration "${service_name}" \
+        --type=json -p "[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"${ca_bundle}\"}]"
+
+    rm -f "${values_file}"
+    rm -rf "${cert_dir}"
 
     echo "Webhook synced to cluster."
 }
