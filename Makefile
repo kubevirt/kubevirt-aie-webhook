@@ -1,7 +1,8 @@
-IMAGE_REGISTRY ?= quay.io/kubevirt
+CONTAINER_ENGINE ?= $(shell KUBEVIRT_CRI=$${KUBEVIRT_CRI} hack/container-engine.sh)
+DOCKER_PREFIX ?= quay.io/kubevirt
 IMAGE_NAME ?= kubevirt-aie-webhook
-IMAGE_TAG ?= latest
-IMG ?= $(IMAGE_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+DOCKER_TAG ?= latest
+IMG ?= $(DOCKER_PREFIX)/$(IMAGE_NAME):$(DOCKER_TAG)
 
 .PHONY: build
 build:
@@ -16,13 +17,13 @@ lint:
 	go vet ./...
 	golangci-lint run ./...
 
-.PHONY: docker-build
-docker-build:
-	docker build -t $(IMG) .
+.PHONY: image-build
+image-build:
+	$(CONTAINER_ENGINE) build -t $(IMG) .
 
-.PHONY: docker-push
-docker-push:
-	docker push $(IMG)
+.PHONY: image-push
+image-push:
+	$(CONTAINER_ENGINE) push $(IMG)
 
 .PHONY: helm-template
 helm-template:

@@ -16,19 +16,7 @@ _action=$1
 shift
 
 function determine_cri_bin() {
-    if [ "${KUBEVIRT_CRI}" = "podman" ]; then
-        echo podman
-    elif [ "${KUBEVIRT_CRI}" = "docker" ]; then
-        echo docker
-    else
-        if podman ps >/dev/null 2>&1; then
-            echo podman
-        elif docker ps >/dev/null 2>&1; then
-            echo docker
-        else
-            echo ""
-        fi
-    fi
+    "${_base_dir}/hack/container-engine.sh"
 }
 
 function kubevirtci::install() {
