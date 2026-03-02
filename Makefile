@@ -43,7 +43,7 @@ cluster-sync:
 
 .PHONY: functest
 functest:
-	KUBECONFIG=$$(scripts/kubevirtci.sh kubeconfig) go test ./tests/... -v -count=1 -timeout 20m
+	KUBECONFIG=$$(scripts/kubevirtci.sh kubeconfig) go test ./tests/... -v -count=1 -timeout 20m $(FUNC_TEST_ARGS)
 
 .PHONY: clean
 clean:

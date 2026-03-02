@@ -60,6 +60,27 @@ rules:
 			Expect(cfg.Rules[0].Selector.VMLabels.MatchLabels).To(HaveKeyWithValue("aie.kubevirt.io/launcher", "true"))
 		})
 
+		It("should parse valid YAML with nodeSelector", func() {
+			data := []byte(`
+rules:
+- name: "label-rule"
+  image: "registry.example.com/launcher:v2"
+  selector:
+    vmLabels:
+      matchLabels:
+        aie.kubevirt.io/launcher: "true"
+  nodeSelector:
+    matchLabels:
+      aie.kubevirt.io/node: "true"
+`)
+			Expect(store.Update(data)).To(Succeed())
+
+			cfg := store.Get()
+			Expect(cfg).ToNot(BeNil())
+			Expect(cfg.Rules[0].NodeSelector).ToNot(BeNil())
+			Expect(cfg.Rules[0].NodeSelector.MatchLabels).To(HaveKeyWithValue("aie.kubevirt.io/node", "true"))
+		})
+
 		It("should handle an empty rules list", func() {
 			Expect(store.Update([]byte("rules: []"))).To(Succeed())
 

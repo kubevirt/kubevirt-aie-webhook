@@ -127,6 +127,15 @@ launcherConfig:
       vmLabels:
         matchLabels:
           kubevirt-aie-webhook/alternative-launcher: "true"
+  - name: "functest-node-affinity"
+    image: "${virt_launcher_devel_alt}"
+    selector:
+      vmLabels:
+        matchLabels:
+          kubevirt-aie-webhook/node-affinity: "true"
+    nodeSelector:
+      matchLabels:
+        kubevirt-aie-webhook/node: "true"
 EOF
 
     echo "Deploying webhook to cluster..."
@@ -146,6 +155,18 @@ EOF
     ca_bundle=$(base64 -w 0 < "${cert_dir}/ca.crt")
     KUBECONFIG="${kubeconfig}" ${_kubectl} patch mutatingwebhookconfiguration "${service_name}" \
         --type=json -p "[{\"op\":\"add\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"${ca_bundle}\"}]"
+
+    echo "Labeling first worker node for node affinity tests..."
+    local first_worker
+    first_worker=$(KUBECONFIG="${kubeconfig}" ${_kubectl} get nodes \
+        -l node-role.kubernetes.io/worker \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [[ -n "${first_worker}" ]]; then
+        KUBECONFIG="${kubeconfig}" ${_kubectl} label node "${first_worker}" \
+            kubevirt-aie-webhook/node=true --overwrite
+    else
+        echo "WARNING: no worker node found, skipping node label"
+    fi
 
     rm -f "${values_file}"
     rm -rf "${cert_dir}"

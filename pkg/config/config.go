@@ -13,9 +13,17 @@ type LauncherConfig struct {
 
 // Rule maps a selector to an alternative launcher image.
 type Rule struct {
-	Name     string   `json:"name"`
-	Image    string   `json:"image"`
-	Selector Selector `json:"selector"`
+	Name         string        `json:"name"`
+	Image        string        `json:"image"`
+	Selector     Selector      `json:"selector"`
+	NodeSelector *NodeSelector `json:"nodeSelector,omitempty"`
+}
+
+// NodeSelector defines node label requirements for pod scheduling.
+// When set, the webhook injects a required node affinity term so that
+// matched pods are only scheduled onto nodes carrying these labels.
+type NodeSelector struct {
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
 }
 
 // Selector defines the criteria for matching a VMI.

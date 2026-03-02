@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	jsonpatch "gomodules.xyz/jsonpatch/v2"
@@ -83,6 +84,8 @@ func (m *VirtLauncherMutator) Handle(ctx context.Context, req admission.Request)
 			Value:     rule.Image,
 		},
 	}
+
+	patches = append(patches, nodeAffinityPatches(pod, rule.NodeSelector)...)
 
 	return admission.Patched("launcher image replaced", patches...)
 }
@@ -165,6 +168,75 @@ func matchesVMLabels(vmLabels *config.VMLabels, vmi *kubevirtv1.VirtualMachineIn
 		}
 	}
 	return true
+}
+
+// nodeAffinityPatches builds JSON patch operations to inject a required node
+// affinity term based on the rule's NodeSelector. It correctly merges with any
+// existing affinity already present on the pod.
+func nodeAffinityPatches(pod *corev1.Pod, nodeSelector *config.NodeSelector) []jsonpatch.JsonPatchOperation {
+	if nodeSelector == nil || len(nodeSelector.MatchLabels) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(nodeSelector.MatchLabels))
+	for k := range nodeSelector.MatchLabels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	expressions := make([]corev1.NodeSelectorRequirement, 0, len(keys))
+	for _, k := range keys {
+		expressions = append(expressions, corev1.NodeSelectorRequirement{
+			Key:      k,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{nodeSelector.MatchLabels[k]},
+		})
+	}
+	term := corev1.NodeSelectorTerm{
+		MatchExpressions: expressions,
+	}
+
+	if pod.Spec.Affinity == nil {
+		return []jsonpatch.JsonPatchOperation{{
+			Operation: "add",
+			Path:      "/spec/affinity",
+			Value: corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{term},
+					},
+				},
+			},
+		}}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		return []jsonpatch.JsonPatchOperation{{
+			Operation: "add",
+			Path:      "/spec/affinity/nodeAffinity",
+			Value: corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{term},
+				},
+			},
+		}}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return []jsonpatch.JsonPatchOperation{{
+			Operation: "add",
+			Path:      "/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution",
+			Value: corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{term},
+			},
+		}}
+	}
+
+	return []jsonpatch.JsonPatchOperation{{
+		Operation: "add",
+		Path:      "/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/-",
+		Value:     term,
+	}}
 }
 
 // escapeJSONPointer escapes special characters in JSON Pointer tokens per RFC 6901.

@@ -278,6 +278,149 @@ var _ = Describe("VirtLauncherMutator", func() {
 		})
 	})
 
+	Context("when a rule has a nodeSelector", func() {
+		It("should inject node affinity when pod has no affinity", func() {
+			altImage := "registry.example.com/aie-launcher:v4"
+			store := newStoreWithRules(config.Rule{
+				Name:  "label-with-affinity",
+				Image: altImage,
+				Selector: config.Selector{
+					VMLabels: &config.VMLabels{
+						MatchLabels: map[string]string{
+							"aie.kubevirt.io/launcher": "true",
+						},
+					},
+				},
+				NodeSelector: &config.NodeSelector{
+					MatchLabels: map[string]string{
+						"aie.kubevirt.io/node": "true",
+					},
+				},
+			})
+
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vmi",
+					Namespace: "default",
+					Labels: map[string]string{
+						"aie.kubevirt.io/launcher": "true",
+					},
+				},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{},
+				},
+			}
+
+			pod := newVirtLauncherPod("virt-launcher-test-vmi-affinity", "default", "test-vmi")
+			k8sClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(vmi).Build()
+			mutator := newMutator(scheme, k8sClient, store)
+
+			resp := mutator.Handle(context.Background(), newAdmissionRequest(pod))
+			Expect(resp.Allowed).To(BeTrue())
+			expectImagePatch(resp, altImage)
+			expectNodeAffinityPatch(resp, "aie.kubevirt.io/node", "true")
+		})
+
+		It("should append to existing node affinity terms", func() {
+			altImage := "registry.example.com/aie-launcher:v4"
+			store := newStoreWithRules(config.Rule{
+				Name:  "label-with-affinity",
+				Image: altImage,
+				Selector: config.Selector{
+					VMLabels: &config.VMLabels{
+						MatchLabels: map[string]string{
+							"aie.kubevirt.io/launcher": "true",
+						},
+					},
+				},
+				NodeSelector: &config.NodeSelector{
+					MatchLabels: map[string]string{
+						"aie.kubevirt.io/node": "true",
+					},
+				},
+			})
+
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vmi",
+					Namespace: "default",
+					Labels: map[string]string{
+						"aie.kubevirt.io/launcher": "true",
+					},
+				},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{},
+				},
+			}
+
+			pod := newVirtLauncherPod("virt-launcher-test-vmi-existing", "default", "test-vmi")
+			pod.Spec.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "existing-key",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"existing-value"},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			k8sClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(vmi).Build()
+			mutator := newMutator(scheme, k8sClient, store)
+
+			resp := mutator.Handle(context.Background(), newAdmissionRequest(pod))
+			Expect(resp.Allowed).To(BeTrue())
+			expectImagePatch(resp, altImage)
+			expectNodeAffinityPatch(resp, "aie.kubevirt.io/node", "true")
+		})
+	})
+
+	Context("when a rule has no nodeSelector", func() {
+		It("should not inject node affinity", func() {
+			altImage := "registry.example.com/aie-launcher:v5"
+			store := newStoreWithRules(config.Rule{
+				Name:  "no-affinity-rule",
+				Image: altImage,
+				Selector: config.Selector{
+					VMLabels: &config.VMLabels{
+						MatchLabels: map[string]string{
+							"aie.kubevirt.io/launcher": "true",
+						},
+					},
+				},
+			})
+
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vmi",
+					Namespace: "default",
+					Labels: map[string]string{
+						"aie.kubevirt.io/launcher": "true",
+					},
+				},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{},
+				},
+			}
+
+			pod := newVirtLauncherPod("virt-launcher-test-vmi-noaff", "default", "test-vmi")
+			k8sClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(vmi).Build()
+			mutator := newMutator(scheme, k8sClient, store)
+
+			resp := mutator.Handle(context.Background(), newAdmissionRequest(pod))
+			Expect(resp.Allowed).To(BeTrue())
+			expectImagePatch(resp, altImage)
+			expectNoAffinityPatch(resp)
+		})
+	})
+
 	Context("when no rule matches", func() {
 		It("should allow the pod without mutation", func() {
 			store := newStoreWithRules(config.Rule{
@@ -418,4 +561,24 @@ func expectAnnotationPatch(resp admission.Response, expectedImage string) {
 		}
 	}
 	ExpectWithOffset(1, found).To(BeTrue(), "expected patch at annotation path")
+}
+
+func expectNodeAffinityPatch(resp admission.Response, expectedKey, expectedValue string) {
+	ExpectWithOffset(1, resp.Patches).ToNot(BeEmpty())
+	for _, p := range resp.Patches {
+		if p.Path == "/spec/affinity" ||
+			p.Path == "/spec/affinity/nodeAffinity" ||
+			p.Path == "/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution" ||
+			p.Path == "/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/-" {
+			return
+		}
+	}
+	ExpectWithOffset(1, false).To(BeTrue(), "expected a node affinity patch")
+}
+
+func expectNoAffinityPatch(resp admission.Response) {
+	for _, p := range resp.Patches {
+		ExpectWithOffset(1, p.Path).ToNot(HavePrefix("/spec/affinity"),
+			"expected no affinity patch but found one at %s", p.Path)
+	}
 }

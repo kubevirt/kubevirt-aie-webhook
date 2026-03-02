@@ -32,3 +32,6 @@ launcherConfig:
   #     vmLabels:
   #       matchLabels:
   #         aie.kubevirt.io/launcher: "true"
+  #   nodeSelector:
+  #     matchLabels:
+  #       aie.kubevirt.io/node: "true"
