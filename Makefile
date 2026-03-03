@@ -4,6 +4,15 @@ IMAGE_NAME ?= kubevirt-aie-webhook
 DOCKER_TAG ?= latest
 IMG ?= $(DOCKER_PREFIX)/$(IMAGE_NAME):$(DOCKER_TAG)
 
+# Version of golangci-lint to install
+GOLANGCI_LINT_VERSION ?= v2.10.1
+
+# Location to install local binaries to
+LOCALBIN ?= $(PWD)/_bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+export PATH := $(LOCALBIN):$(PATH)
+
 .PHONY: build
 build:
 	go build -o kubevirt-aie-webhook .
@@ -13,9 +22,15 @@ test:
 	go test ./... -v -count=1
 
 .PHONY: lint
-lint:
+lint: golangci-lint
 	go vet ./...
 	golangci-lint run ./...
+
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT)
+$(GOLANGCI_LINT): $(LOCALBIN)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(LOCALBIN) $(GOLANGCI_LINT_VERSION)
 
 .PHONY: image-build
 image-build:
@@ -47,4 +62,4 @@ functest:
 
 .PHONY: clean
 clean:
-	rm -rf kubevirt-aie-webhook _kubevirt
+	rm -rf kubevirt-aie-webhook _kubevirt _bin

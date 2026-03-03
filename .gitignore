@@ -21,3 +21,6 @@ vendor/
 
 # Cloned kubevirt repo (managed by scripts/kubevirtci.sh)
 _kubevirt/
+
+# Local tool binaries (managed by Makefile)
+_bin/
