@@ -1,0 +1,13 @@
+aliases:
+  approvers:
+    - vladikr
+    - jean-edouard
+    - xpivarc
+    - lyarwood
+    - fossedihelm
+  code-reviewers:
+    - vladikr
+    - jean-edouard
+    - xpivarc
+    - lyarwood
+    - fossedihelm
