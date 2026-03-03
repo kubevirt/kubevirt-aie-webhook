@@ -7,6 +7,9 @@ IMG ?= $(DOCKER_PREFIX)/$(IMAGE_NAME):$(DOCKER_TAG)
 # Version of golangci-lint to install
 GOLANGCI_LINT_VERSION ?= v2.10.1
 
+# Version of helm to install
+HELM_VERSION ?= v3.17.3
+
 # Location to install local binaries to
 LOCALBIN ?= $(PWD)/_bin
 $(LOCALBIN):
@@ -40,8 +43,14 @@ image-build:
 image-push:
 	$(CONTAINER_ENGINE) push $(IMG)
 
+HELM ?= $(LOCALBIN)/helm
+.PHONY: helm
+helm: $(HELM)
+$(HELM): $(LOCALBIN)
+	curl -sSfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false bash -s -- --version $(HELM_VERSION)
+
 .PHONY: helm-template
-helm-template:
+helm-template: helm
 	helm template kubevirt-aie-webhook deploy/helm/kubevirt-aie-webhook
 
 .PHONY: cluster-up
@@ -53,7 +62,7 @@ cluster-down:
 	scripts/kubevirtci.sh down
 
 .PHONY: cluster-sync
-cluster-sync:
+cluster-sync: helm
 	scripts/kubevirtci.sh sync
 
 .PHONY: functest
