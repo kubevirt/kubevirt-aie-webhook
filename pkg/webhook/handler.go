@@ -26,7 +26,7 @@ const (
 // VirtLauncherMutator mutates virt-launcher pods to use alternative launcher images
 // based on VMI device and label selectors.
 type VirtLauncherMutator struct {
-	Client  client.Client
+	Client  client.Reader
 	Store   *config.ConfigStore
 	Decoder admission.Decoder
 }

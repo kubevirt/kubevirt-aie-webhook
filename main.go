@@ -5,11 +5,13 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -85,6 +87,19 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
+		Cache: cache.Options{
+			ReaderFailOnMissingInformer: true,
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.ConfigMap{}: {
+					Field: fields.SelectorFromSet(fields.Set{
+						"metadata.name": configMapName,
+					}),
+					Namespaces: map[string]cache.Config{
+						namespace: {},
+					},
+				},
+			},
+		},
 		Metrics: metricsserver.Options{
 			BindAddress: ":8080",
 		},
@@ -126,10 +141,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register mutating webhook handler
+	// Register mutating webhook handler using the manager's API reader for
+	// VMI lookups. The manager's default client reads through the cache, which
+	// only has an informer for ConfigMaps. With ReaderFailOnMissingInformer
+	// enabled, any Get/List for a type without a running informer (such as
+	// VirtualMachineInstance) will fail rather than lazily starting one.
 	mgr.GetWebhookServer().Register("/mutate-pods", &webhook.Admission{
 		Handler: &webhookpkg.VirtLauncherMutator{
-			Client:  mgr.GetClient(),
+			Client:  mgr.GetAPIReader(),
 			Store:   store,
 			Decoder: admission.NewDecoder(scheme),
 		},
