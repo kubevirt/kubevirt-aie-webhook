@@ -5,13 +5,16 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"strings"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	cliflag "k8s.io/component-base/cli/flag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -89,6 +92,8 @@ func main() {
 		probeAddr                                          string
 		secureMetrics                                      bool
 		enableHTTP2                                        bool
+		cipherSuitesFlag                                   string
+		minTLSVersion                                      string
 		tlsOpts                                            []func(*tls.Config)
 	)
 
@@ -110,6 +115,14 @@ func main() {
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 
+	flag.StringVar(&cipherSuitesFlag, "tls-cipher-suites", "",
+		"Comma-separated list of cipher suites for the server. "+
+			"If omitted, the default Go cipher suites will be used. \n"+
+			"Preferred values: "+strings.Join(cliflag.PreferredTLSCipherNames(), ", ")+". \n"+
+			"Insecure values: "+strings.Join(cliflag.InsecureTLSCipherNames(), ", ")+".")
+	flag.StringVar(&minTLSVersion, "tls-min-version", "",
+		"Minimum TLS version supported. "+
+			"Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -133,6 +146,13 @@ func main() {
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
+
+	var cipherSuites []string
+	if cipherSuitesFlag != "" {
+		cipherSuites = strings.Split(cipherSuitesFlag, ",")
+	}
+	tlsOpts = appendCipherSuites(setupLog, tlsOpts, cipherSuites)
+	tlsOpts = appendMinTLSVersion(setupLog, tlsOpts, minTLSVersion)
 
 	webhookTLSOpts := tlsOpts
 	webhookServerOptions := webhook.Options{
@@ -248,4 +268,40 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func appendCipherSuites(setupLog logr.Logger, tlsOpts []func(*tls.Config), cipherSuites []string) []func(*tls.Config) {
+	if len(cipherSuites) == 0 {
+		return tlsOpts
+	}
+	cipherSuiteIDs, err := cliflag.TLSCipherSuites(cipherSuites)
+	if err != nil {
+		setupLog.Error(err, "failed to parse TLS cipher suites")
+		os.Exit(1)
+	}
+
+	setCipherSuites := func(c *tls.Config) {
+		setupLog.Info("setting tls cipher suites to " + strings.Join(cipherSuites, ", "))
+		c.CipherSuites = cipherSuiteIDs
+	}
+
+	return append(tlsOpts, setCipherSuites)
+}
+
+func appendMinTLSVersion(setupLog logr.Logger, tlsOpts []func(*tls.Config), minTLSVersion string) []func(*tls.Config) {
+	if minTLSVersion == "" {
+		return tlsOpts
+	}
+	minTLSVersionID, err := cliflag.TLSVersion(minTLSVersion)
+	if err != nil {
+		setupLog.Error(err, "failed to parse TLS min version")
+		os.Exit(1)
+	}
+
+	setMinTLSVersion := func(c *tls.Config) {
+		setupLog.Info("setting tls min version to " + minTLSVersion)
+		c.MinVersion = minTLSVersionID
+	}
+
+	return append(tlsOpts, setMinTLSVersion)
 }
