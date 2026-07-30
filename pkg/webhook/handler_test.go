@@ -519,6 +519,56 @@ var _ = Describe("VirtLauncherMutator", func() {
 		})
 	})
 
+	Context("when only the device rule matches and the label rule does not", func() {
+		It("should match via the device rule without requiring labels", func() {
+			deviceImage := "device-image:v1"
+			labelImage := "label-image:v2"
+			store := newStoreWithRules(
+				config.Rule{
+					Name:  "device-rule",
+					Image: deviceImage,
+					Selector: config.Selector{
+						DeviceNames: []string{"nvidia.com/GH100_GH200_120GB___480GB"},
+					},
+				},
+				config.Rule{
+					Name:  "label-rule",
+					Image: labelImage,
+					Selector: config.Selector{
+						VMLabels: &config.VMLabels{
+							MatchLabels: map[string]string{"aie.kubevirt.io/launcher": "true"},
+						},
+					},
+				},
+			)
+
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vmi",
+					Namespace: "default",
+				},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{
+						Devices: kubevirtv1.Devices{
+							GPUs: []kubevirtv1.GPU{
+								{Name: "gpu0", DeviceName: "nvidia.com/GH100_GH200_120GB___480GB"},
+							},
+						},
+					},
+				},
+			}
+
+			pod := newVirtLauncherPod("virt-launcher-test-vmi-deviceonly", "default", "test-vmi")
+			k8sClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(vmi).Build()
+			mutator := newMutator(scheme, k8sClient, store)
+
+			resp := mutator.Handle(context.Background(), newAdmissionRequest(pod))
+			Expect(resp.Allowed).To(BeTrue())
+			expectImagePatch(resp, deviceImage)
+			expectAnnotationPatch(resp, deviceImage)
+		})
+	})
+
 	Context("when the admission request is invalid", func() {
 		It("should return a bad request error", func() {
 			store := newStoreWithRules()
